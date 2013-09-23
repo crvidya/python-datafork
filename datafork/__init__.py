@@ -21,8 +21,27 @@ class DataState(object):
     def merge_children(self, children, or_none=False):
         pass
 
-    def create_child(self, owner=None):
+    def _create_child(self, owner=None):
         return DataState(self.root, self, owner)
+
+    def _child_context(self, owner, auto_merge):
+        previous = self.root.current_state
+        new = self._create_child(owner)
+        class Context(object):
+            def __enter__(context):
+                self.root.current_state = new
+                return new
+            def __exit__(context, exc_type, exc_value, traceback):
+                if auto_merge and exc_type is None:
+                    self.merge_children([new])
+                self.root.current_state = previous
+        return Context()
+
+    def fork(self, owner=None):
+        return self._child_context(owner, auto_merge=False)
+
+    def transaction(self, owner=None):
+        return self._child_context(owner, auto_merge=True)
 
 
 class DataSlot(object):
@@ -106,25 +125,6 @@ class DataRoot(object):
         self.slot_type = slot_type
         self.slots = set()
 
-    def _child_context(self, owner, auto_merge):
-        previous = self.current_state
-        new = previous.create_child(owner)
-        class Context(object):
-            def __enter__(context):
-                self.current_state = new
-                return new
-            def __exit__(context, exc_type, exc_value, traceback):
-                if auto_merge and exc_type is None:
-                    previous.merge_children([new])
-                self.current_state = previous
-        return Context()
-
-    def fork(self, owner=None):
-        return self._child_context(owner, auto_merge=False)
-
-    def transaction(self, owner=None):
-        return self._child_context(owner, auto_merge=True)
-
     def slot(
         self,
         owner=None,
@@ -161,6 +161,12 @@ class DataRoot(object):
 
     def merge_children(self, children, or_none=False):
         self.root_state.merge_children(children, or_none=or_none)
+
+    def fork(self, owner=None):
+        return self.root_state.fork(owner)
+
+    def transaction(self, owner=None):
+        return self.root_state.transaction(owner)
 
     def __enter__(self):
         return self
