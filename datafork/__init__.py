@@ -43,6 +43,21 @@ class State(object):
     def transaction(self, owner=None):
         return self._child_context(owner, auto_merge=True)
 
+    def set_slot(self, slot, value, position=None):
+        self.slot_values[slot] = value
+        self.slot_positions[slot] = set(
+            [position] if position is not None else []
+        )
+
+    def get_slot_value(self, slot):
+        current = self
+        while current is not None:
+            try:
+                return current.slot_values[slot]
+            except KeyError:
+                current = self.parent
+            return Slot.NOT_KNOWN
+
 
 class Slot(object):
     # we will compare by reference to this thing to detect the "don't know"
@@ -54,13 +69,11 @@ class Slot(object):
         root,
         owner=None,
         initial_value=NOT_KNOWN,
-        initial_position=None
     ):
         self.owner = owner
         self.root = root
         self.set_value(
             initial_value,
-            position=initial_position,
         )
 
     @property
@@ -71,16 +84,17 @@ class Slot(object):
                 self.final_value,
             )
         except AttributeError:
-            state = get_current_state()
-            result = NOT_KNOWN
-            while state is not None:
-                try:
-                    result = state.slot_values[self]
-                except KeyError:
-                    state = state.parent
             return DataSlot.prepare_return_value(
-                self, result,
+                self,
+                self.root.current_state.get_slot_value(self),
             )
+
+    @property
+    def positions(self):
+        try:
+            return self.final_positions
+        except AttributeError:
+            return self.root.current_state.get_slot_positions(self)
 
     @value.setter
     def value(self, value):
@@ -93,8 +107,11 @@ class Slot(object):
                 "Can't set value on slot %r: it has been finalized" % self,
             )
         else:
-            get_current_state().slot_values[self] = value
-            get_current_state().slot_positions[self] = position
+            self.root.current_state.set_slot(
+                self,
+                value,
+                position=position,
+            )
 
     def set_value_not_known(self, position=None):
         current_data.set_slot_value(NOT_KNOWN, position=position)
