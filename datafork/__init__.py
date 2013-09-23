@@ -9,7 +9,7 @@ __all__ = [
 ]
 
 
-class DataState(object):
+class State(object):
 
     def __init__(self, root, parent=None, owner=None):
         self.root = root
@@ -22,7 +22,7 @@ class DataState(object):
         pass
 
     def _create_child(self, owner=None):
-        return DataState(self.root, self, owner)
+        return State(self.root, self, owner)
 
     def _child_context(self, owner, auto_merge):
         previous = self.root.current_state
@@ -44,7 +44,7 @@ class DataState(object):
         return self._child_context(owner, auto_merge=True)
 
 
-class DataSlot(object):
+class Slot(object):
     # we will compare by reference to this thing to detect the "don't know"
     # case.
     NOT_KNOWN = type("not_known", (object,), {})()
@@ -118,17 +118,17 @@ class DataSlot(object):
             return value
 
 
-class DataRoot(object):
-    def __init__(self, root_state, slot_type=DataSlot):
-        self.root_state = root_state
-        self.current_state = root_state
+class Root(State):
+    def __init__(self, root_owner=None, slot_type=Slot):
+        State.__init__(self, self, None, root_owner)
+        self.current_state = self
         self.slot_type = slot_type
         self.slots = set()
 
     def slot(
         self,
         owner=None,
-        initial_value=DataSlot.NOT_KNOWN,
+        initial_value=Slot.NOT_KNOWN,
         initial_position=None,
     ):
         """
@@ -159,15 +159,6 @@ class DataRoot(object):
             # The slot doesn't need the root anymore.
             del slot.root
 
-    def merge_children(self, children, or_none=False):
-        self.root_state.merge_children(children, or_none=or_none)
-
-    def fork(self, owner=None):
-        return self.root_state.fork(owner)
-
-    def transaction(self, owner=None):
-        return self.root_state.transaction(owner)
-
     def __enter__(self):
         return self
 
@@ -175,9 +166,8 @@ class DataRoot(object):
         self.finalize_data()
 
 
-def root(initial_owner=None):
-    root_state = DataState(self, owner=initial_owner)
-    new = DataRoot(root_state)
+def root(owner=None):
+    new = Root(root_owner=owner)
     class Context(object):
         def __enter__(self):
             return new
