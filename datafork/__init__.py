@@ -122,7 +122,7 @@ class Slot(object):
     def value_is_known(self):
         try:
             value = self.value
-        except DataSlotValueNotKnownError:
+        except ValueNotKnownError:
             return False
         else:
             return True
@@ -130,9 +130,9 @@ class Slot(object):
     @classmethod
     def prepare_return_value(cls, slot, value):
         if type(value) is MergeConflict:
-            raise DataSlotValueAmbiguousError(slot, value)
-        elif value is NOT_KNOWN:
-            raise DataSlotValueNotKnownError(slot)
+            raise ValueAmbiguousError(slot, value)
+        elif value is cls.NOT_KNOWN:
+            raise ValueNotKnownError(slot)
         else:
             return value
 
