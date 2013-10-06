@@ -121,7 +121,7 @@ class Slot(object):
     @property
     def value_is_known(self):
         try:
-            self.get_value()
+            value = self.value
         except DataSlotValueNotKnownError:
             return False
         else:
