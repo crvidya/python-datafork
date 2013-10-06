@@ -19,7 +19,64 @@ class State(object):
         self.owner = owner
 
     def merge_children(self, children, or_none=False):
-        pass
+        if len(children) == 0:
+            return
+
+        # Make sure all of the provided children are actually children,
+        # or else crazy things will happen.
+        for child in children:
+            if child.parent != self:
+                raise Exception(
+                    "Cant' merge %r into %r: not a child" % (child, self)
+                )
+
+        slots = set()
+        # Add to the slot set only those keys where one of the children
+        # disagrees with this state.
+        for child in children:
+            for slot in child.slot_values.iterkeys():
+                mine = self.slot_values.get(slot, Slot.NOT_KNOWN)
+                theirs = child.slot_values[slot]
+                if mine != theirs:
+                    slots.add(slot)
+
+        states = [state for state in children]
+        if or_none:
+            states.append(self)
+
+        for slot in slots:
+            possibles = []
+            for state in states:
+                possibles.append(
+                    (
+                        state.get_slot_value(slot),
+                        state.get_slot_positions(slot),
+                    )
+                )
+
+            all_positions = set()
+            for possible in possibles:
+                all_positions.update(possible[1])
+            self.slot_positions[slot] = all_positions
+
+            all_agreed = all(
+                possibles[0][0] == possible[0]
+                for possible in possibles
+            )
+            if all_agreed:
+                self.slot_values[slot] = possibles[0][0]
+            else:
+                # create a merge conflict so the caller can see all of
+                # the possibilities and either fail or choose one via
+                # an application-specific means.
+                self.slot_values[slot] = MergeConflict(
+                    [
+                        MergeConflictPossibility(
+                            value,
+                            positions,
+                        ) for value, positions in possibles
+                    ]
+                )
 
     def _create_child(self, owner=None):
         return State(self.root, self, owner)
@@ -57,6 +114,15 @@ class State(object):
             except KeyError:
                 current = self.parent
             return Slot.NOT_KNOWN
+
+    def get_slot_positions(self, slot):
+        current = self
+        while current is not None:
+            try:
+                return current.slot_positions[slot]
+            except KeyError:
+                current = self.parent
+            return set()
 
 
 class Slot(object):
@@ -202,6 +268,29 @@ class MergeConflict(object):
 
     def __repr__(self):
         return "<MergeConflict %r>" % self.possibilities
+
+
+class MergeConflictPossibility(object):
+    def __init__(self, value, positions):
+        self.value = value
+        self.positions = positions
+
+    def __repr__(self):
+        return "<%r at %r>" % (self.value, self.positions)
+
+    def __eq__(self, other):
+        if type(other) is type(self):
+            return (
+                self.value == other.value and self.positions == other.positions
+            )
+        elif type(other) is tuple:
+            return (
+                (self.value, self.positions) == other
+            )
+        else:
+            raise NotImplementedError(
+                'Cannot compare MergeConflictPossibility to %r' % type(other)
+            )
 
 
 class ValueNotKnownError(Exception):
