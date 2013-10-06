@@ -81,12 +81,12 @@ class Slot(object):
     @property
     def value(self):
         try:
-            return DataSlot.prepare_return_value(
+            return Slot.prepare_return_value(
                 self,
                 self.final_value,
             )
         except AttributeError:
-            return DataSlot.prepare_return_value(
+            return Slot.prepare_return_value(
                 self,
                 self.root.current_state.get_slot_value(self),
             )
