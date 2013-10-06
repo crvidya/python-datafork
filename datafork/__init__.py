@@ -304,7 +304,3 @@ class ValueAmbiguousError(ValueNotKnownError):
         Exception.__init__(self, 'Slot %r value is ambiguous' % slot)
         self.slot = slot
         self.conflict = conflict
-
-
-class NoActiveRoot(Exception):
-    pass
