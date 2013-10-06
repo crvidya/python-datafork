@@ -1,15 +1,30 @@
 datafork
 ========
 
-``datafork`` is a Python utility library for creating global (actually,
-thread-local) data slots whose content can be temporarily "forked",
-possibly mutated, and then merged back in to what was already present.
+``datafork`` is a Python utility library for creating data slots whose content
+can be temporarily "forked", possibly mutated, and then merged back into what
+was already present.
 
 This allows for code to evaluate "what if" scenarios, and then conditionally
 merge the result depending on whether the outcome was acceptable.
 
 This model could be thought of as a sort of "transactional memory", though
 it also evokes the idea of dynamic scope.
+
+The simplest use-case is a transaction block whose side-effects apply only
+if the block runs to completion without raising an exception::
+
+    import datafork
+
+    with datafork.root() as root:
+        example_slot = root.slot(initial_value=1)
+        with root.transaction():
+            example_slot.value = 2
+            might_raise_exception()
+        # this will print 1 if an exception was raised, or 2 if not.
+        print example_slot.value
+
+For other examples and reference documentation, see the manual.
 
 Installation
 ------------
