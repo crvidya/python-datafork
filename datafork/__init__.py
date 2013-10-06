@@ -116,7 +116,7 @@ class Slot(object):
             )
 
     def set_value_not_known(self, position=None):
-        current_data.set_slot_value(NOT_KNOWN, position=position)
+        self.set_value(Slot.NOT_KNOWN, position=position)
 
     @property
     def value_is_known(self):
