@@ -213,7 +213,7 @@ class ValueNotKnownError(Exception):
 class ValueAmbiguousError(ValueNotKnownError):
     def __init__(self, slot, conflict):
         Exception.__init__(self, 'Slot %r value is ambiguous' % slot)
-        self.slot = sloft
+        self.slot = slot
         self.conflict = conflict
 
 
