@@ -54,6 +54,51 @@ class TestState(unittest.TestCase):
             root_state.current_state is root_state,
         )
 
+    def test_transaction(self):
+        root_state = datafork.Root()
+
+        with root_state.transaction('owner') as child_state:
+            self.assertEqual(
+                type(child_state),
+                datafork.State,
+            )
+            child_state.set_slot("dummy", 12, "dummypos")
+            self.assertTrue(
+                root_state.current_state is child_state,
+            )
+
+        # the block completed successfully so we should've auto-merged
+        self.assertEqual(
+            root_state.get_slot_value("dummy"),
+            12,
+        )
+
+        try:
+            with root_state.transaction('owner') as child_state:
+                self.assertEqual(
+                    type(child_state),
+                    datafork.State,
+                )
+                child_state.set_slot("dummy", 15, "dummypos")
+                self.assertTrue(
+                    root_state.current_state is child_state,
+                )
+                raise Exception('dummy')
+        except Exception, ex:
+            self.assertEqual(
+                ex.message, 'dummy'
+            )
+
+        # the block excepted so we should not have auto-merged
+        self.assertEqual(
+            root_state.get_slot_value("dummy"),
+            12,
+        )
+
+        self.assertTrue(
+            root_state.current_state is root_state,
+        )
+
     def test_nested_states(self):
         root_state = datafork.Root()
 
