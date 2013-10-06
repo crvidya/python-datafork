@@ -62,7 +62,9 @@ class State(object):
 class Slot(object):
     # we will compare by reference to this thing to detect the "don't know"
     # case.
-    NOT_KNOWN = type("not_known", (object,), {})()
+    NOT_KNOWN = type("not_known", (object,), {
+        "__repr__": lambda self: "datafork.Slot.NOT_KNOWN"
+    })()
 
     def __init__(
         self,
