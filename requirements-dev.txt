@@ -2,3 +2,4 @@ nose
 coverage
 pep8==1.4.6
 mock
+sphinx

@@ -10,6 +10,14 @@ __all__ = [
 
 
 class State(object):
+    """
+    A set of values for slots under a given root.
+
+    During the lifetime of a root, *state* objects act as the temporary data
+    storage for the values of slots. Each root has a currently-active state
+    and new child states can be created and activated by making use of the
+    :py:meth:`fork` method, or its smarter cousin :py:meth:`transaction`.
+    """
 
     def __init__(self, root, parent=None, owner=None):
         self.root = root
@@ -19,6 +27,20 @@ class State(object):
         self.owner = owner
 
     def merge_children(self, children, or_none=False):
+        """
+        Given an iterable of one or more child states, merge the values
+        of slots in these child states back into this state.
+
+        When all of the provided children agree on the value for a
+        slot, that value will replace the existing value in this state.
+        If any provided child disagrees, the slot enters the merge conflict
+        state and attempts to retrieve its value will result in the
+        :py:class:`ValueAmbiguousError` exception.
+
+        If the `or_none` parameter is set to `True`, the merge will
+        consider the value of each slot in *this* state in addition to the
+        provided children.
+        """
         if len(children) == 0:
             return
 
@@ -95,9 +117,36 @@ class State(object):
         return Context()
 
     def fork(self, owner=None):
+        """
+        Create a child state.
+
+        This method returns a context manager that activates a child state
+        but does not do any automatic merging of the child on completion.
+        When using this method it is the caller's responsibility to use
+        :py:meth:`merge_children` to merge down any changes made in the
+        child state, if appropriate.
+
+        To be used with a `with` block. For example:
+
+        .. code-block:: python
+
+            with state.fork() as child_state:
+                some_slot.value = 2
+                state.merge_children([child_state])
+        """
         return self._child_context(owner, auto_merge=False)
 
     def transaction(self, owner=None):
+        """
+        Create a child state and automatically merge it on success.
+
+        This is similar to :py:meth:`fork` except that upon the successful
+        (i.e. non-exceptional) completion of the block it will automatically
+        call :py:meth:`merge_children` to apply the changes in the block.
+
+        This is a helper for the common case of a block whose side-effects
+        must only apply when it is completely successful.
+        """
         return self._child_context(owner, auto_merge=True)
 
     def set_slot(self, slot, value, position=None):
@@ -126,6 +175,20 @@ class State(object):
 
 
 class Slot(object):
+    """
+    A container for a single value that can be changed transactionally.
+
+    During the lifetime of a slot's root its value depends on the
+    currently-active state. Once the root block terminates, the value
+    is baked into the object so that it can be used independently of the
+    root and its child states.
+
+    A slot also has a set of "positions" associated with it. The `datafork`
+    module itself does not care what is in this set, but callers could use
+    this to keep track of where values are set in order to better understand
+    the possibilities in case of a merge conflict.
+    """
+
     # we will compare by reference to this thing to detect the "don't know"
     # case.
     NOT_KNOWN = type("not_known", (object,), {
@@ -146,6 +209,20 @@ class Slot(object):
 
     @property
     def value(self):
+        """
+        The slot's current value.
+
+        This can be assigned as long as the slot's root is still alive, in
+        which case the new value applies to the currently-active state.
+        Once the root scope exits, the value is baked into the slot and
+        becomes unchangable.
+
+        If this attribute is accessed when the value is not known, the
+        :py:class:`ValueNotKnownError` exception will be raised. If the
+        value is not known because this slot is currently in a merge conflict
+        state, the more-specific :py:class:`ValueAmbiguousError` will be
+        raised.
+        """
         try:
             return Slot.prepare_return_value(
                 self,
@@ -159,6 +236,11 @@ class Slot(object):
 
     @property
     def positions(self):
+        """
+        The current :py:class:`set` of positions for this slot. There will
+        most be zero or one members of this set, but there can be more
+        after data states have been merged.
+        """
         try:
             return self.final_positions
         except AttributeError:
@@ -169,6 +251,13 @@ class Slot(object):
         self.set_value(value)
 
     def set_value(self, value, position=None):
+        """
+        Set the slot's value and provide an optional position.
+
+        This is equivalent to assigning to :py:attr:`value` but provides
+        the extra optional parameter for setting the position for the new
+        value.
+        """
         if hasattr(self, "final_value"):
             # should never happen
             raise Exception(
@@ -182,10 +271,24 @@ class Slot(object):
             )
 
     def set_value_not_known(self, position=None):
+        """
+        Mark this slot has having an unknown value.
+
+        When a slot's value is not known, attempts to read the value
+        will result in a :py:class:`ValueNotKnownError` exception.
+        """
         self.set_value(Slot.NOT_KNOWN, position=position)
 
     @property
     def value_is_known(self):
+        """
+        ``True`` if this slot's value is presently known, or
+        ``False`` if not.
+
+        A slot's value might be unknown if it has never been assigned, if it
+        has been explicitly declared as unknown, or if the slot is currently
+        in a merge conflict state.
+        """
         try:
             value = self.value
         except ValueNotKnownError:
@@ -204,6 +307,16 @@ class Slot(object):
 
 
 class Root(State):
+    """
+    A root context that can be used to create slots.
+
+    :py:func:`root` is the public interface to create a root, and is intended
+    to be used in a ``with`` block. Once you've established a root context
+    you can create slots using the :py:meth:`slot` method.
+
+    A root is a special kind of :py:class:`State` and thus inherits the
+    state-management functions of that class.
+    """
     def __init__(self, root_owner=None, slot_type=Slot):
         State.__init__(self, self, None, root_owner)
         self.current_state = self
@@ -217,7 +330,10 @@ class Root(State):
         initial_position=None,
     ):
         """
-        Creates a new slot in this root.
+        Creates a new :py:class:`Slot` in this root.
+
+        The slot's value will remain mutable for the lifetime of the root
+        context, and will be frozen upon its exit.
         """
         slot = self.slot_type(self, owner, initial_value, initial_position)
         self.slots.add(slot)
@@ -252,6 +368,15 @@ class Root(State):
 
 
 def root(owner=None):
+    """
+    Creates and returns a context manager that provides a :py:class:`Root`
+    object. Use this in a with block like this:
+
+    .. code-block:: python
+
+        with datafork.root():
+            # etc
+    """
     new = Root(root_owner=owner)
     class Context(object):
         def __enter__(self):
@@ -262,6 +387,15 @@ def root(owner=None):
 
 
 class MergeConflict(object):
+    """
+    Represents the case where :py:meth:`State.merge_children` discovers
+    a conflict between the states it is provided, allowing the caller
+    to investigate all of the possibilities and perhaps to choose one
+    to apply using application-specific logic.
+    """
+    #: A sequence of :py:class:`MergeConflictPossibility` objects describing
+    #: possible values.
+    possibilities = []
 
     def __init__(self, possibilities):
         self.possibilities = possibilities
@@ -271,6 +405,14 @@ class MergeConflict(object):
 
 
 class MergeConflictPossibility(object):
+    """
+    Represents a single possibility within a :py:class:`MergeConflict`.
+    """
+    #: The value from this possibility
+    value = None
+    #: Set of the positions at which this possibility originated.
+    positions = set()
+
     def __init__(self, value, positions):
         self.value = value
         self.positions = positions
@@ -294,12 +436,28 @@ class MergeConflictPossibility(object):
 
 
 class ValueNotKnownError(Exception):
+    """
+    Exception that is raised when a caller attempts to access the value of a
+    symbol whose value is unknown.
+    """
+    #: The slot that this error relates to.
+    slot = None
+
     def __init__(self, slot):
         Exception.__init__(self, 'Slot %r value not known' % slot)
         self.slot = slot
 
 
 class ValueAmbiguousError(ValueNotKnownError):
+    """
+    Exception that is raised when a caller attempts to access the value of a
+    symbol that is in the merge conflict state.
+    """
+    #: The slot that this error relates to.
+    slot = None
+    #: A :py:class:`MergeConflict` object describing the conflict.
+    conflict = None
+
     def __init__(self, slot, conflict):
         Exception.__init__(self, 'Slot %r value is ambiguous' % slot)
         self.slot = slot

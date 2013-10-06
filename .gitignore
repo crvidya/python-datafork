@@ -3,3 +3,4 @@
 htmlcov/
 datafork.egg-info/*
 env/*
+docs/_build/*
