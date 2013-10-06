@@ -206,13 +206,13 @@ class MergeConflict(object):
 
 class ValueNotKnownError(Exception):
     def __init__(self, slot):
-        Exception.__init__('Slot %r value not known' % slot)
+        Exception.__init__(self, 'Slot %r value not known' % slot)
         self.slot = slot
 
 
 class ValueAmbiguousError(ValueNotKnownError):
     def __init__(self, slot, conflict):
-        Exception.__init__('Slot %r value is ambiguous' % slot)
+        Exception.__init__(self, 'Slot %r value is ambiguous' % slot)
         self.slot = sloft
         self.conflict = conflict
 
