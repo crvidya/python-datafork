@@ -327,7 +327,6 @@ class Root(State):
         self,
         owner=None,
         initial_value=Slot.NOT_KNOWN,
-        initial_position=None,
     ):
         """
         Creates a new :py:class:`Slot` in this root.
@@ -335,7 +334,7 @@ class Root(State):
         The slot's value will remain mutable for the lifetime of the root
         context, and will be frozen upon its exit.
         """
-        slot = self.slot_type(self, owner, initial_value, initial_position)
+        slot = self.slot_type(self, owner, initial_value)
         self.slots.add(slot)
         return slot
 
