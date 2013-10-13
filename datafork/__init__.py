@@ -353,8 +353,8 @@ class Root(State):
 
     def finalize_data(self):
         for slot in self.slots:
-            slot.final_value = slot.value
-            slot.final_position = slot.position
+            slot.final_value = self.get_slot_value(slot)
+            slot.final_positions = self.get_slot_positions(slot)
             # sever the connection from the slot to the root so that
             # the root can be garbage collected after the with block exits.
             # The slot doesn't need the root anymore.
