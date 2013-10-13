@@ -433,6 +433,12 @@ class MergeConflictPossibility(object):
                 'Cannot compare MergeConflictPossibility to %r' % type(other)
             )
 
+    def __cmp__(self, other):
+        return cmp(
+            (self.value, list(sorted(self.positions))),
+            (other.value, list(sorted(other.positions))),
+        )
+
 
 class ValueNotKnownError(Exception):
     """
