@@ -2,7 +2,7 @@ from distutils.core import setup
 
 setup(
     name="datafork",
-    version="0.0.1",
+    version="dev",
     description="Forkable global state",
     packages=['datafork'],
     author="Martin Atkins",
