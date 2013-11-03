@@ -139,13 +139,29 @@ class State(object):
         )
 
     def get_slot_value(self, slot):
+        # fast path: we already have a local version of this
+        if slot in self.slot_values:
+            return self.slot_values[slot]
+
         current = self
+        value = Slot.NOT_KNOWN
         while current is not None:
             try:
-                return current.slot_values[slot]
+                value = current.slot_values[slot]
+                break
             except KeyError:
-                current = self.parent
-            return Slot.NOT_KNOWN
+                current = current.parent
+
+        # If the slot has a fork function defined, fork the value before
+        # we return it. This is important if e.g. the value is some sort
+        # of mutable collection, where we need to make sure that each
+        # state "sees" a different collection object rather than them
+        # all modifying the same one.
+        if value is not Slot.NOT_KNOWN and slot.fork is not None:
+            value = slot.fork(value)
+            self.slot_values[slot] = value
+
+        return value
 
     def get_slot_positions(self, slot):
         current = self
@@ -222,11 +238,13 @@ class Slot(object):
         initial_value=NOT_KNOWN,
         needs_merge=values_unequal,
         merge=equality_merge,
+        fork=None,
     ):
         self.owner = owner
         self.root = root
         self.needs_merge = needs_merge
         self.merge = merge
+        self.fork = fork
         self.set_value(
             initial_value,
         )

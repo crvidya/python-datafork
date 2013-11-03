@@ -127,6 +127,41 @@ class TestState(unittest.TestCase):
             root_state.current_state is root_state,
         )
 
+    def test_slot_fork(self):
+        root_state = datafork.Root()
+        forking_slot = MagicMock()
+        non_forking_slot = MagicMock()
+
+        non_forking_slot.fork = None
+        forking_slot.fork.return_value = "forked"
+
+        root_state.set_slot(forking_slot, "unforked")
+        root_state.set_slot(non_forking_slot, "unforked")
+
+        with root_state.fork() as child_state:
+            child_forked = child_state.get_slot_value(forking_slot)
+            child_unforked = child_state.get_slot_value(non_forking_slot)
+
+        parent_forked = root_state.get_slot_value(forking_slot)
+        parent_unforked = root_state.get_slot_value(non_forking_slot)
+
+        self.assertEqual(
+            parent_forked,
+            "unforked",
+        )
+        self.assertEqual(
+            parent_unforked,
+            "unforked",
+        )
+        self.assertEqual(
+            child_forked,
+            "forked",
+        )
+        self.assertEqual(
+            child_unforked,
+            "unforked",
+        )
+
 
 class TestMergeImplementations(unittest.TestCase):
 
