@@ -53,14 +53,11 @@ class State(object):
                 )
 
         slots = set()
-        # Add to the slot set only those keys where one of the children
-        # disagrees with this state.
+        # Add to the slot set only those keys where at least one of the
+        # children has its own value.
         for child in children:
             for slot in child.slot_values.iterkeys():
-                mine = self.slot_values.get(slot, Slot.NOT_KNOWN)
-                theirs = child.slot_values[slot]
-                if slot.needs_merge(mine, theirs):
-                    slots.add(slot)
+                slots.add(slot)
 
         states = [state for state in children]
         if or_none:
@@ -173,14 +170,6 @@ class State(object):
             return set()
 
 
-def values_unequal(val1, val2):
-    """
-    Returns true if the two provided values are not equal. This
-    is the default implementation of `needs_merge` on :py:class:`Slot`.
-    """
-    return val1 != val2
-
-
 def equality_merge(cases):
     """
     If all of the provided :py:class:`MergeCase` objects are equal, returns
@@ -218,9 +207,7 @@ class Slot(object):
 
     By default slot values compare and merge by equality, leading to a
     merge conflict if the value of a slot differs between two states. The
-    parameters `needs_merge` and `merge` can be used to respectively provide
-    different implementations of determining if a merge is required
-    (takes two values and returns True if a merge is required) and actually
+    parameter `merge` can be used to provide a different implementation of
     performing the merge (takes a set of values and returns the merged
     version, or a :py:class:`MergeConflict` if no resolution is possible.)
     """
@@ -236,13 +223,11 @@ class Slot(object):
         root,
         owner=None,
         initial_value=NOT_KNOWN,
-        needs_merge=values_unequal,
         merge=equality_merge,
         fork=None,
     ):
         self.owner = owner
         self.root = root
-        self.needs_merge = needs_merge
         self.merge = merge
         self.fork = fork
         self.set_value(

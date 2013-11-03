@@ -165,10 +165,6 @@ class TestState(unittest.TestCase):
 
 class TestMergeImplementations(unittest.TestCase):
 
-    def test_values_unequal(self):
-        self.assertTrue(datafork.values_unequal(1, 2))
-        self.assertFalse(datafork.values_unequal(1, 1))
-
     def test_equality_merge_success(self):
         self.assertEqual(
             datafork.equality_merge(
@@ -466,4 +462,27 @@ class TestStateMerge(unittest.TestCase):
                 "child_2_d",
                 "child_3_d",
             },
+        )
+
+    def test_indirect_merge(self):
+        # This tests the case where we have more than one level of fork
+        # active, and where the two forks happen to agree but the
+        # parent disagrees with the both.
+        # This test is in response to a previous bug where this behavior
+        # was exhibited.
+        parent = datafork.State(self.mock_root)
+        parent.set_slot(self.slot_a, 1, "parent_a")
+        parent.set_slot(self.slot_b, 5, "parent_b")
+        child = datafork.State(self.mock_root, parent)
+        child.set_slot(self.slot_a, 2, "child_a")
+        grandchild = datafork.State(self.mock_root, child)
+        grandchild.set_slot(self.slot_a, 2, "grandchild_a")
+        grandchild.set_slot(self.slot_b, 5, "grandchild_b")
+
+        child.merge_children([grandchild])
+        parent.merge_children([child])
+
+        self.assertEqual(
+            self.slot_a.merge.call_count,
+            2
         )
