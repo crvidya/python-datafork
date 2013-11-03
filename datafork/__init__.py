@@ -59,7 +59,7 @@ class State(object):
             for slot in child.slot_values.iterkeys():
                 mine = self.slot_values.get(slot, Slot.NOT_KNOWN)
                 theirs = child.slot_values[slot]
-                if mine != theirs:
+                if slot.needs_merge(mine, theirs):
                     slots.add(slot)
 
         states = [state for state in children]
@@ -70,7 +70,7 @@ class State(object):
             possibles = []
             for state in states:
                 possibles.append(
-                    (
+                    MergePossibility(
                         state.get_slot_value(slot),
                         state.get_slot_positions(slot),
                     )
@@ -78,27 +78,10 @@ class State(object):
 
             all_positions = set()
             for possible in possibles:
-                all_positions.update(possible[1])
+                all_positions.update(possible.positions)
             self.slot_positions[slot] = all_positions
 
-            all_agreed = all(
-                possibles[0][0] == possible[0]
-                for possible in possibles
-            )
-            if all_agreed:
-                self.slot_values[slot] = possibles[0][0]
-            else:
-                # create a merge conflict so the caller can see all of
-                # the possibilities and either fail or choose one via
-                # an application-specific means.
-                self.slot_values[slot] = MergeConflict(
-                    [
-                        MergeConflictPossibility(
-                            value,
-                            positions,
-                        ) for value, positions in possibles
-                    ]
-                )
+            self.slot_values[slot] = slot.merge(possibles)
 
     def _create_child(self, owner=None):
         return State(self.root, self, owner)
@@ -174,6 +157,35 @@ class State(object):
             return set()
 
 
+def values_unequal(val1, val2):
+    """
+    Returns true if the two provided values are not equal. This
+    is the default implementation of `needs_merge` on :py:class:`Slot`.
+    """
+    return val1 != val2
+
+
+def equality_merge(cases):
+    """
+    If all of the provided :py:class:`MergeCase` objects are equal, returns
+    the common value. Otherwise, returns a merge conflict describing all
+    of the different values.
+
+    This is the default implementation of `merge` on :py:class:`Slot`.
+    """
+    all_agreed = all(
+        cases[0].value == case.value
+        for case in cases
+    )
+    if all_agreed:
+        return cases[0].value
+    else:
+        # create a merge conflict so the caller can see all of
+        # the possibilities and either fail or choose one via
+        # an application-specific means.
+        return MergeConflict(cases)
+
+
 class Slot(object):
     """
     A container for a single value that can be changed transactionally.
@@ -187,6 +199,14 @@ class Slot(object):
     module itself does not care what is in this set, but callers could use
     this to keep track of where values are set in order to better understand
     the possibilities in case of a merge conflict.
+
+    By default slot values compare and merge by equality, leading to a
+    merge conflict if the value of a slot differs between two states. The
+    parameters `needs_merge` and `merge` can be used to respectively provide
+    different implementations of determining if a merge is required
+    (takes two values and returns True if a merge is required) and actually
+    performing the merge (takes a set of values and returns the merged
+    version, or a :py:class:`MergeConflict` if no resolution is possible.)
     """
 
     # we will compare by reference to this thing to detect the "don't know"
@@ -200,9 +220,13 @@ class Slot(object):
         root,
         owner=None,
         initial_value=NOT_KNOWN,
+        needs_merge=values_unequal,
+        merge=equality_merge,
     ):
         self.owner = owner
         self.root = root
+        self.needs_merge = needs_merge
+        self.merge = merge
         self.set_value(
             initial_value,
         )
@@ -338,18 +362,6 @@ class Root(State):
         self.slots.add(slot)
         return slot
 
-    def slotted_object(self):
-        return SlottedObject(self)
-
-    def slotted_mapping(self):
-        return SlottedMapping(self)
-
-    def slotted_sequence(self):
-        return SlottedSequence(self)
-
-    def slotted_set(self):
-        return SlottedSet(self)
-
     def finalize_data(self):
         for slot in self.slots:
             slot.final_value = self.get_slot_value(slot)
@@ -403,9 +415,10 @@ class MergeConflict(object):
         return "<MergeConflict %r>" % self.possibilities
 
 
-class MergeConflictPossibility(object):
+class MergePossibility(object):
     """
-    Represents a single possibility within a :py:class:`MergeConflict`.
+    Represents a single possibility in a merge, or within a
+    :py:class:`MergeConflict`.
     """
     #: The value from this possibility
     value = None
