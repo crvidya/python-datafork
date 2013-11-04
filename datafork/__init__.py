@@ -9,167 +9,6 @@ __all__ = [
 ]
 
 
-class State(object):
-    """
-    A set of values for slots under a given root.
-
-    During the lifetime of a root, *state* objects act as the temporary data
-    storage for the values of slots. Each root has a currently-active state
-    and new child states can be created and activated by making use of the
-    :py:meth:`fork` method, or its smarter cousin :py:meth:`transaction`.
-    """
-
-    def __init__(self, root, parent=None, owner=None):
-        self.root = root
-        self.parent = parent
-        self.slot_values = {}
-        self.slot_positions = collections.defaultdict(lambda: set())
-        self.owner = owner
-
-    def merge_children(self, children, or_none=False):
-        """
-        Given an iterable of one or more child states, merge the values
-        of slots in these child states back into this state.
-
-        When all of the provided children agree on the value for a
-        slot, that value will replace the existing value in this state.
-        If any provided child disagrees, the slot enters the merge conflict
-        state and attempts to retrieve its value will result in the
-        :py:class:`ValueAmbiguousError` exception.
-
-        If the `or_none` parameter is set to `True`, the merge will
-        consider the value of each slot in *this* state in addition to the
-        provided children.
-        """
-        if len(children) == 0:
-            return
-
-        # Make sure all of the provided children are actually children,
-        # or else crazy things will happen.
-        for child in children:
-            if child.parent != self:
-                raise Exception(
-                    "Cant' merge %r into %r: not a child" % (child, self)
-                )
-
-        slots = set()
-        # Add to the slot set only those keys where at least one of the
-        # children has its own value.
-        for child in children:
-            for slot in child.slot_values.iterkeys():
-                slots.add(slot)
-
-        states = [state for state in children]
-        if or_none:
-            states.append(self)
-
-        for slot in slots:
-            possibles = []
-            for state in states:
-                possibles.append(
-                    MergePossibility(
-                        state.get_slot_value(slot),
-                        state.get_slot_positions(slot),
-                    )
-                )
-
-            all_positions = set()
-            for possible in possibles:
-                all_positions.update(possible.positions)
-            self.slot_positions[slot] = all_positions
-
-            self.slot_values[slot] = slot.merge(possibles)
-
-    def _create_child(self, owner=None):
-        return State(self.root, self, owner)
-
-    def _child_context(self, owner, auto_merge):
-        previous = self.root.current_state
-        new = self._create_child(owner)
-        class Context(object):
-            def __enter__(context):
-                self.root.current_state = new
-                return new
-            def __exit__(context, exc_type, exc_value, traceback):
-                if auto_merge and exc_type is None:
-                    self.merge_children([new])
-                self.root.current_state = previous
-        return Context()
-
-    def fork(self, owner=None):
-        """
-        Create a child state.
-
-        This method returns a context manager that activates a child state
-        but does not do any automatic merging of the child on completion.
-        When using this method it is the caller's responsibility to use
-        :py:meth:`merge_children` to merge down any changes made in the
-        child state, if appropriate.
-
-        To be used with a `with` block. For example:
-
-        .. code-block:: python
-
-            with state.fork() as child_state:
-                some_slot.value = 2
-                state.merge_children([child_state])
-        """
-        return self._child_context(owner, auto_merge=False)
-
-    def transaction(self, owner=None):
-        """
-        Create a child state and automatically merge it on success.
-
-        This is similar to :py:meth:`fork` except that upon the successful
-        (i.e. non-exceptional) completion of the block it will automatically
-        call :py:meth:`merge_children` to apply the changes in the block.
-
-        This is a helper for the common case of a block whose side-effects
-        must only apply when it is completely successful.
-        """
-        return self._child_context(owner, auto_merge=True)
-
-    def set_slot(self, slot, value, position=None):
-        self.slot_values[slot] = value
-        self.slot_positions[slot] = set(
-            [position] if position is not None else []
-        )
-
-    def get_slot_value(self, slot):
-        # fast path: we already have a local version of this
-        if slot in self.slot_values:
-            return self.slot_values[slot]
-
-        current = self
-        value = Slot.NOT_KNOWN
-        while current is not None:
-            try:
-                value = current.slot_values[slot]
-                break
-            except KeyError:
-                current = current.parent
-
-        # If the slot has a fork function defined, fork the value before
-        # we return it. This is important if e.g. the value is some sort
-        # of mutable collection, where we need to make sure that each
-        # state "sees" a different collection object rather than them
-        # all modifying the same one.
-        if value is not Slot.NOT_KNOWN and slot.fork is not None:
-            value = slot.fork(value)
-            self.slot_values[slot] = value
-
-        return value
-
-    def get_slot_positions(self, slot):
-        current = self
-        while current is not None:
-            try:
-                return current.slot_positions[slot]
-            except KeyError:
-                current = self.parent
-            return set()
-
-
 def equality_merge(cases):
     """
     If all of the provided :py:class:`MergeCase` objects are equal, returns
@@ -323,6 +162,10 @@ class Slot(object):
         else:
             return True
 
+    @property
+    def is_finalized(self):
+        return hasattr(self, "final_value")
+
     @classmethod
     def prepare_return_value(cls, slot, value):
         if type(value) is MergeConflict:
@@ -331,6 +174,203 @@ class Slot(object):
             raise ValueNotKnownError(slot)
         else:
             return value
+
+
+class State(object):
+    """
+    A set of values for slots under a given root.
+
+    During the lifetime of a root, *state* objects act as the temporary data
+    storage for the values of slots. Each root has a currently-active state
+    and new child states can be created and activated by making use of the
+    :py:meth:`fork` method, or its smarter cousin :py:meth:`transaction`.
+    """
+
+    def __init__(self, root, parent=None, owner=None):
+        self.root = root
+        self.parent = parent
+        self.slot_values = {}
+        self.slot_positions = collections.defaultdict(lambda: set())
+        self.owner = owner
+        self.slots = set()
+
+    def merge_children(self, children, or_none=False):
+        """
+        Given an iterable of one or more child states, merge the values
+        of slots in these child states back into this state.
+
+        When all of the provided children agree on the value for a
+        slot, that value will replace the existing value in this state.
+        If any provided child disagrees, the slot enters the merge conflict
+        state and attempts to retrieve its value will result in the
+        :py:class:`ValueAmbiguousError` exception.
+
+        If the `or_none` parameter is set to `True`, the merge will
+        consider the value of each slot in *this* state in addition to the
+        provided children.
+        """
+        if len(children) == 0:
+            return
+
+        # Make sure all of the provided children are actually children,
+        # or else crazy things will happen.
+        for child in children:
+            if child.parent != self:
+                raise Exception(
+                    "Cant' merge %r into %r: not a child" % (child, self)
+                )
+
+        slots = set()
+        # Add to the slot set only those keys where at least one of the
+        # children has its own value.
+        for child in children:
+            for slot in child.slot_values.iterkeys():
+                # we only merge slots that are still open, since
+                # finalized slots must belong to the child and are of
+                # no interest to us.
+                if not slot.is_finalized:
+                    slots.add(slot)
+
+        states = [state for state in children]
+        if or_none:
+            states.append(self)
+
+        for slot in slots:
+            possibles = []
+            for state in states:
+                possibles.append(
+                    MergePossibility(
+                        state.get_slot_value(slot),
+                        state.get_slot_positions(slot),
+                    )
+                )
+
+            all_positions = set()
+            for possible in possibles:
+                all_positions.update(possible.positions)
+            self.slot_positions[slot] = all_positions
+
+            self.slot_values[slot] = slot.merge(possibles)
+
+    def _create_child(self, owner=None):
+        return State(self.root, self, owner)
+
+    def _child_context(self, owner, auto_merge):
+        previous = self.root.current_state
+        new = self._create_child(owner)
+        class Context(object):
+            def __enter__(context):
+                self.root.current_state = new
+                return new
+            def __exit__(context, exc_type, exc_value, traceback):
+                if auto_merge and exc_type is None:
+                    self.merge_children([new])
+                new.finalize_data()
+                self.root.current_state = previous
+        return Context()
+
+    def fork(self, owner=None):
+        """
+        Create a child state.
+
+        This method returns a context manager that activates a child state
+        but does not do any automatic merging of the child on completion.
+        When using this method it is the caller's responsibility to use
+        :py:meth:`merge_children` to merge down any changes made in the
+        child state, if appropriate.
+
+        To be used with a `with` block. For example:
+
+        .. code-block:: python
+
+            with state.fork() as child_state:
+                some_slot.value = 2
+                state.merge_children([child_state])
+        """
+        return self._child_context(owner, auto_merge=False)
+
+    def transaction(self, owner=None):
+        """
+        Create a child state and automatically merge it on success.
+
+        This is similar to :py:meth:`fork` except that upon the successful
+        (i.e. non-exceptional) completion of the block it will automatically
+        call :py:meth:`merge_children` to apply the changes in the block.
+
+        This is a helper for the common case of a block whose side-effects
+        must only apply when it is completely successful.
+        """
+        return self._child_context(owner, auto_merge=True)
+
+    def set_slot(self, slot, value, position=None):
+        self.slot_values[slot] = value
+        self.slot_positions[slot] = set(
+            [position] if position is not None else []
+        )
+
+    def get_slot_value(self, slot):
+        # fast path: we already have a local version of this
+        if slot in self.slot_values:
+            return self.slot_values[slot]
+
+        current = self
+        value = Slot.NOT_KNOWN
+        while current is not None:
+            try:
+                value = current.slot_values[slot]
+                break
+            except KeyError:
+                current = current.parent
+
+        # If the slot has a fork function defined, fork the value before
+        # we return it. This is important if e.g. the value is some sort
+        # of mutable collection, where we need to make sure that each
+        # state "sees" a different collection object rather than them
+        # all modifying the same one.
+        if value is not Slot.NOT_KNOWN and slot.fork is not None:
+            value = slot.fork(value)
+            self.slot_values[slot] = value
+
+        return value
+
+    def get_slot_positions(self, slot):
+        current = self
+        while current is not None:
+            try:
+                return current.slot_positions[slot]
+            except KeyError:
+                current = self.parent
+            return set()
+
+    def slot(
+        self,
+        owner=None,
+        initial_value=Slot.NOT_KNOWN,
+        **kwargs
+    ):
+        """
+        Creates a new :py:class:`Slot` in this state.
+
+        The slot's value will remain mutable for the lifetime of the state,
+        and will be frozen upon its exit.
+        """
+        slot = self.root.slot_type(
+            self.root,
+            owner,
+            initial_value,
+            **kwargs
+        )
+        self.slots.add(slot)
+        return slot
+
+    def finalize_data(self):
+        for slot in self.slots:
+            slot.final_value = self.get_slot_value(slot)
+            slot.final_positions = self.get_slot_positions(slot)
+            # sever the connection from the slot to the root so that
+            # the root can be garbage collected after the with block exits.
+            # The slot doesn't need the root anymore.
+            del slot.root
 
 
 class Root(State):
@@ -348,37 +388,6 @@ class Root(State):
         State.__init__(self, self, None, root_owner)
         self.current_state = self
         self.slot_type = slot_type
-        self.slots = set()
-
-    def slot(
-        self,
-        owner=None,
-        initial_value=Slot.NOT_KNOWN,
-        **kwargs
-    ):
-        """
-        Creates a new :py:class:`Slot` in this root.
-
-        The slot's value will remain mutable for the lifetime of the root
-        context, and will be frozen upon its exit.
-        """
-        slot = self.slot_type(
-            self,
-            owner,
-            initial_value,
-            **kwargs
-        )
-        self.slots.add(slot)
-        return slot
-
-    def finalize_data(self):
-        for slot in self.slots:
-            slot.final_value = self.get_slot_value(slot)
-            slot.final_positions = self.get_slot_positions(slot)
-            # sever the connection from the slot to the root so that
-            # the root can be garbage collected after the with block exits.
-            # The slot doesn't need the root anymore.
-            del slot.root
 
     def __enter__(self):
         return self

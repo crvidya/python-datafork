@@ -49,6 +49,12 @@ class TestState(unittest.TestCase):
             self.assertTrue(
                 root_state.current_state is child_state,
             )
+            child_state_slot = child_state.slot()
+
+        self.assertTrue(
+            hasattr(child_state_slot, "final_value"),
+            "child_state_slot wasn't finalized when child state exited"
+        )
 
         self.assertTrue(
             root_state.current_state is root_state,
