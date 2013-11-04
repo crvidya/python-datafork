@@ -323,6 +323,17 @@ class Slot(object):
         else:
             return True
 
+    def finalize(self):
+        if not hasattr(self, "final_value"):
+            self.final_value = self.root.current_state.get_slot_value(self)
+        if not hasattr(self, "final_positions"):
+            self.final_positions = self.root.current_state.get_slot_positions(self)
+        # sever the connection from the slot to the root so that
+        # the root can be garbage collected after the with block exits.
+        # The slot doesn't need the root anymore.
+        if hasattr(self, "root"):
+            del self.root
+
     @classmethod
     def prepare_return_value(cls, slot, value):
         if type(value) is MergeConflict:
@@ -373,12 +384,7 @@ class Root(State):
 
     def finalize_data(self):
         for slot in self.slots:
-            slot.final_value = self.get_slot_value(slot)
-            slot.final_positions = self.get_slot_positions(slot)
-            # sever the connection from the slot to the root so that
-            # the root can be garbage collected after the with block exits.
-            # The slot doesn't need the root anymore.
-            del slot.root
+            slot.finalize()
 
     def __enter__(self):
         return self
