@@ -6,4 +6,5 @@ install:
   - "pip install -e . --use-mirrors"
   # Testing dependencies
   - "pip install --use-mirrors -U -r requirements-dev.txt"
+  
 script: nosetests -v --with-coverage --cover-erase --cover-inclusive --cover-branches --cover-package=datafork
