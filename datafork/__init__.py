@@ -66,12 +66,18 @@ class State(object):
         for slot in slots:
             possibles = []
             for state in states:
-                possibles.append(
-                    MergePossibility(
-                        state.get_slot_value(slot),
-                        state.get_slot_positions(slot),
+                slot_value = state.get_slot_value(slot)
+                if isinstance(slot_value, MergeConflict):
+                    # Flatten existing merge conflicts so we don't end up
+                    # with them nested inside each other.
+                    possibles.extend(slot_value.possibilities)
+                else:
+                    possibles.append(
+                        MergePossibility(
+                            slot_value,
+                            state.get_slot_positions(slot),
+                        )
                     )
-                )
 
             all_positions = set()
             for possible in possibles:
